@@ -153,6 +153,46 @@ func TestConvertGeminiResponseToOpenAIResponses_UnwrapAndAggregateText(t *testin
 	}
 }
 
+func TestConvertGeminiResponseToOpenAIResponses_DoneMarkerCompletesOpenResponse(t *testing.T) {
+	in := []string{
+		`data: {"response":{"candidates":[{"content":{"role":"model","parts":[{"text":"hello"}]}}],"usageMetadata":{"promptTokenCount":1,"candidatesTokenCount":1,"totalTokenCount":2},"modelVersion":"test-model","responseId":"req_done_1"},"traceId":"t1"}`,
+		`data: [DONE]`,
+		`data: [DONE]`,
+	}
+
+	var param any
+	var out [][]byte
+	for _, line := range in {
+		out = append(out, ConvertGeminiResponseToOpenAIResponses(context.Background(), "test-model", nil, nil, []byte(line), &param)...)
+	}
+
+	var (
+		textDone       string
+		completedCount int
+		completedText  string
+	)
+	for _, chunk := range out {
+		ev, data := parseSSEEvent(t, chunk)
+		switch ev {
+		case "response.output_text.done":
+			textDone = data.Get("text").String()
+		case "response.completed":
+			completedCount++
+			completedText = data.Get("response.output.0.content.0.text").String()
+		}
+	}
+
+	if textDone != "hello" {
+		t.Fatalf("expected output_text.done text from [DONE] finalization, got %q", textDone)
+	}
+	if completedCount != 1 {
+		t.Fatalf("expected exactly one response.completed event, got %d", completedCount)
+	}
+	if completedText != "hello" {
+		t.Fatalf("expected response.completed output text from [DONE] finalization, got %q", completedText)
+	}
+}
+
 func TestConvertGeminiResponseToOpenAIResponses_ReasoningEncryptedContent(t *testing.T) {
 	sig := "RXE0RENrZ0lDeEFDR0FJcVFOZDdjUzlleGFuRktRdFcvSzNyZ2MvWDNCcDQ4RmxSbGxOWUlOVU5kR1l1UHMrMGdkMVp0Vkg3ekdKU0g4YVljc2JjN3lNK0FrdGpTNUdqamI4T3Z0VVNETzdQd3pmcFhUOGl3U3hXUEJvTVFRQ09mWTFyMEtTWGZxUUlJakFqdmFGWk83RW1XRlBKckJVOVpkYzdDKw=="
 	in := []string{

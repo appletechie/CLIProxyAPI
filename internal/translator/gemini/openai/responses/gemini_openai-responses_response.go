@@ -35,6 +35,7 @@ type geminiToResponsesState struct {
 	ReasoningEnc    string
 	ReasoningBuf    strings.Builder
 	ReasoningClosed bool
+	Completed       bool
 
 	// function call aggregation (keyed by output_index)
 	NextIndex        int
@@ -121,8 +122,15 @@ func ConvertGeminiResponseToOpenAIResponses(_ context.Context, modelName string,
 	}
 
 	rawJSON = bytes.TrimSpace(rawJSON)
-	if len(rawJSON) == 0 || bytes.Equal(rawJSON, []byte("[DONE]")) {
+	if len(rawJSON) == 0 || st.Completed {
 		return [][]byte{}
+	}
+	isDone := bytes.Equal(rawJSON, []byte("[DONE]"))
+	if isDone {
+		if !st.Started {
+			return [][]byte{}
+		}
+		rawJSON = []byte(`{"candidates":[{"finishReason":"STOP"}]}`)
 	}
 
 	root := gjson.ParseBytes(rawJSON)
@@ -381,7 +389,7 @@ func ConvertGeminiResponseToOpenAIResponses(_ context.Context, modelName string,
 	}
 
 	// Finalization on finishReason
-	if fr := root.Get("candidates.0.finishReason"); fr.Exists() && fr.String() != "" {
+	if fr := root.Get("candidates.0.finishReason"); fr.Exists() && fr.String() != "" && !st.Completed {
 		// Finalize reasoning first to keep ordering tight with last delta
 		finalizeReasoning()
 		finalizeMessage()
@@ -562,6 +570,7 @@ func ConvertGeminiResponseToOpenAIResponses(_ context.Context, modelName string,
 		}
 
 		out = append(out, emitEvent("response.completed", completed))
+		st.Completed = true
 	}
 
 	return out
